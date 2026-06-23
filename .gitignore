@@ -1,0 +1,41 @@
+# Secrets — never commit
+.env
+
+# OS junk
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+venv/
+.venv/
+
+# Generated data (reproducible via scripts/01_ingest.py and 02_index.py)
+# Ignore contents but keep the directory structure via .gitkeep
+data/raw/*
+data/processed/*
+data/finetune/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/finetune/.gitkeep
+.chroma/
+
+# Models (large binaries; produced in Phase 2)
+models/merged/*
+models/gguf/*
+!models/merged/.gitkeep
+!models/gguf/.gitkeep
+
+# Logs and run artifacts
+logs/*
+!logs/.gitkeep
+finetune/runs/*
+!finetune/runs/.gitkeep
+eval/reports/*
+!eval/reports/.gitkeep
+
+# Lockfiles are generated on first build
+requirements.lock

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "gs_001",
+    "question": "What are Pfizer's stated principal risk factors?",
+    "reference_answer": "",
+    "expected_sources": [{"company": "Pfizer", "year": 2024, "section": "Item 1A"}],
+    "question_type": "factual",
+    "should_abstain": false
+  },
+  {
+    "id": "gs_002",
+    "question": "What is the company's stated exposure to quantum-computing supply-chain risk?",
+    "reference_answer": "",
+    "expected_sources": [],
+    "question_type": "negative",
+    "should_abstain": true
+  }
+]

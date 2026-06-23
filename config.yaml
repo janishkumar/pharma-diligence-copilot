@@ -1,0 +1,102 @@
+# Corpus
+corpus:
+  tickers: [PFE, MRK, JNJ, ABBV, BMY, LLY, AMGN, GILD, REGN, VRTX, MRNA, BIIB]
+  num_fiscal_years: 1
+  max_filings_per_run: 30
+
+# EDGAR
+edgar:
+  user_agent: "Janish Kumar kjanish28@gmail.com"
+  rate_limit_per_sec: 10
+  backoff_base_sec: 1
+  backoff_max_sec: 60
+  backoff_max_retries: 5
+  prefer_amended: true
+
+# Chunking
+chunking:
+  chunk_size_tokens: 800
+  chunk_overlap_tokens: 120
+  sentence_splitter: nltk  # or pysbd
+
+# Embeddings
+embeddings:
+  model_name: "BAAI/bge-small-en-v1.5"
+  normalize: true
+  query_instruction: "Represent this sentence for searching relevant passages: "
+  batch_size_gpu: 64
+  batch_size_cpu: 16
+  device: auto  # auto | cuda | mps | cpu
+
+# Vector store
+vector_store:
+  type: chroma
+  persist_dir: ".chroma"
+  collection_name: "pharma_10k_v384_bge_small"
+
+# Retrieval
+retrieval:
+  top_k_dense: 20
+  hybrid_enabled: false
+  bm25_top_k: 20
+  rrf_k: 60
+
+# Reranking
+rerank:
+  enabled: true
+  model_name: "BAAI/bge-reranker-base"
+  top_n: 5
+  timeout_sec: 2
+  score_threshold: -2.0
+
+# Generation
+generation:
+  backend: anthropic
+  model: "claude-sonnet-4-6"
+  temperature: 0.1
+  top_p: 0.95
+  max_output_tokens: 800
+  abstention_string: "The provided documents do not contain enough information to answer this."
+
+# Evaluation
+eval:
+  golden_set_path: "eval/golden_set_v1.json"
+  judge_backend: openai
+  judge_model: "gpt-4o"
+  seed: 42
+
+# Fine-tune
+finetune:
+  base_model: "Qwen2.5-7B-Instruct"
+  load_in_4bit: true
+  lora_r: 16
+  lora_alpha: 16
+  lora_dropout: 0
+  max_seq_length: 2048
+  epochs: 2
+  learning_rate: 2.0e-4
+  lr_scheduler: cosine
+  packing: true
+  seed: 42
+  eval_every_steps: 100
+  early_stop_patience_steps: 200
+  checkpoint_every_steps: 200
+  tracking: tensorboard  # tensorboard | wandb | none
+
+# Quantization and serving
+serving:
+  gguf_quant: Q4_K_M
+  ollama_model_name: "pharma-diligence"
+  ollama_host: "http://localhost:11434"
+
+# Budgets
+budgets:
+  cost_budget_usd_per_session: 10
+  max_disk_usage_gb: 80
+  max_eval_wall_clock_minutes: 30
+
+# Logging
+logging:
+  level: INFO
+  format: json
+  dir: "logs/"

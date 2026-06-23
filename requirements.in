@@ -1,0 +1,52 @@
+# Filing acquisition
+edgartools
+sec-edgar-downloader
+
+# Parsing / text
+unstructured
+beautifulsoup4
+nltk
+pysbd
+
+# Chunking / embeddings
+sentence-transformers>=3.0,<4.0
+
+# Vector store
+chromadb==0.5.*
+
+# Keyword search (optional hybrid)
+rank-bm25
+
+# Generation backends
+anthropic
+openai
+
+# Evaluation
+ragas==0.2.*
+rapidfuzz
+
+# API
+fastapi
+uvicorn[standard]
+
+# Demo UI
+streamlit
+
+# CLI
+typer[all]
+
+# Config / env
+pydantic>=2.0,<3.0
+python-dotenv
+PyYAML
+
+# Logging
+structlog
+
+# Tests
+pytest
+pytest-cov
+
+# Utilities
+tqdm
+httpx
