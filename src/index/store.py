@@ -1,3 +1,5 @@
+from typing import Any, Optional
+
 import chromadb
 from src.config import cfg, PROJECT_ROOT
 from src.logging_setup import get_logger
@@ -8,11 +10,13 @@ log = get_logger("store")
 PERSIST_DIR = str(PROJECT_ROOT / cfg["vector_store"]["persist_dir"])
 COLLECTION_NAME = cfg["vector_store"]["collection_name"]
 
-_client: chromadb.PersistentClient | None = None
-_collection = None
+# chromadb.PersistentClient is a factory function, not a type, so it cannot be
+# used in a runtime-evaluated `X | None` annotation. Use Any for the globals.
+_client: Optional[Any] = None
+_collection: Optional[Any] = None
 
 
-def get_client() -> chromadb.PersistentClient:
+def get_client():
     global _client
     if _client is None:
         _client = chromadb.PersistentClient(path=PERSIST_DIR)

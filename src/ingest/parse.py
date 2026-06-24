@@ -1,9 +1,7 @@
-import hashlib
-import json
+import re
 from datetime import datetime, timezone
-from pathlib import Path
 
-from src.config import PROJECT_ROOT, cfg
+from src.config import PROJECT_ROOT
 from src.logging_setup import get_logger
 from src.schemas import Filing
 
@@ -14,6 +12,42 @@ PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
 MANDATORY_SECTIONS = {"Item 1", "Item 1A", "Item 7"}
 OPTIONAL_SECTIONS = {"Item 7A", "Item 8", "Item 9A"}
+TARGET_ITEMS = ["Item 1", "Item 1A", "Item 7", "Item 7A", "Item 8", "Item 9A"]
+
+# A captured section must clear this many chars to count as real content, not a
+# stub/heading. Optional sections often legitimately cross-reference (e.g. a
+# company folds market-risk into Item 7), so the floor is low; mandatory
+# sections get a much higher floor in _validate_mandatory_sections.
+MIN_SECTION_CHARS = 30
+MIN_MANDATORY_CHARS = 500
+
+
+# Running page header, e.g. "Pfizer Inc.2025 Form 10-K" or "2025 Form 10-K | "
+_PAGE_HEADER = re.compile(r"(?im)^.{0,60}?20\d\d\s+form\s+10-?k.*$")
+# Standalone "Table of Contents" navigation line
+_TOC = re.compile(r"(?im)^[ \t]*table of contents[ \t]*$")
+# A bare page-number line (1-4 digits, optionally bracketed by pipes/spaces)
+_PAGE_NUM_LINE = re.compile(r"(?m)^[ \t]*\|?[ \t]*\d{1,4}[ \t]*\|?[ \t]*$")
+# Leading stray page number before the first recognized ITEM header
+_LEADING_PAGE_NUM = re.compile(r"(?is)^\s*\d{1,4}\s+(?=item\s)")
+
+
+def _normalize_text(text: str) -> str:
+    """Normalize whitespace and strip page furniture for clean chunking.
+
+    Removes recurring EDGAR page-furniture (running 'Form 10-K' headers, bare
+    page-number lines, 'Table of Contents' nav, and a stray leading page number
+    before the item header) so chunks are not polluted by repetitive boilerplate
+    (PRD Section 19.1 junk/near-duplicate criteria).
+    """
+    # normalize unicode spaces (nbsp, etc.) to plain space
+    text = "".join(" " if (ch.isspace() and ch not in "\n\t") else ch for ch in text)
+    text = _PAGE_HEADER.sub("", text)
+    text = _TOC.sub("", text)
+    text = _PAGE_NUM_LINE.sub("", text)
+    text = _LEADING_PAGE_NUM.sub("", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def parse_filing(ticker: str, filing_obj) -> Filing:
@@ -29,6 +63,13 @@ def parse_filing(ticker: str, filing_obj) -> Filing:
     form_type = getattr(filing_obj, "form", "10-K")
     accession = getattr(filing_obj, "accession_number", "") or getattr(filing_obj, "accession_no", "")
 
+    # source_url: prefer the primary document URL, fall back to the filing index page
+    source_url = (
+        getattr(filing_obj, "filing_url", "")
+        or getattr(filing_obj, "homepage_url", "")
+        or getattr(filing_obj, "url", "")
+    )
+
     filing = Filing(
         company_name=getattr(filing_obj, "company", ticker),
         ticker=ticker,
@@ -39,7 +80,7 @@ def parse_filing(ticker: str, filing_obj) -> Filing:
         filing_date=str(getattr(filing_obj, "filing_date", "")),
         accession_number=accession,
         accession_number_original=None,
-        source_url=getattr(filing_obj, "filing_index", ""),
+        source_url=source_url,
         file_sha256="",  # filled in by ingest script after fetch
         ingested_at=datetime.now(timezone.utc).isoformat(),
         parsed_sections=sections,
@@ -48,24 +89,25 @@ def parse_filing(ticker: str, filing_obj) -> Filing:
 
 
 def _extract_sections_edgartools(filing_obj) -> dict[str, str]:
+    """Extract item sections via edgartools dict-style item access.
+
+    `tenk[item_label]` returns the full item *text* (e.g. 'Item 8' ~260k chars),
+    unlike semantic attributes such as `tenk.financials` which return summary
+    objects whose str() is a one-line stub. Use the canonical labels the filing
+    reports in `tenk.items`.
+    """
     tenk = filing_obj.obj()
     sections = {}
-    item_map = {
-        "Item 1": ["business"],
-        "Item 1A": ["risk_factors"],
-        "Item 7": ["management_discussion"],
-        "Item 7A": ["market_risk"],
-        "Item 8": ["financials"],
-        "Item 9A": ["controls_and_procedures"],
-    }
-    for label, attrs in item_map.items():
-        for attr in attrs:
-            val = getattr(tenk, attr, None)
-            if val is not None:
-                text = str(val).strip()
-                if text:
-                    sections[label] = text
-                    break
+    for label in TARGET_ITEMS:
+        try:
+            val = tenk[label]
+        except Exception:
+            val = None
+        if val is None:
+            continue
+        text = _normalize_text(str(val))
+        if len(text) >= MIN_SECTION_CHARS and text.lower() != "none":
+            sections[label] = text
     return sections
 
 
@@ -112,6 +154,16 @@ def _validate_mandatory_sections(ticker: str, sections: dict):
     missing = MANDATORY_SECTIONS - set(sections.keys())
     if missing:
         raise ValueError(f"Mandatory sections missing for {ticker}: {missing}")
+    # Present-but-tiny is a parse failure (truncation or stub), not success.
+    truncated = {
+        s: len(sections[s])
+        for s in MANDATORY_SECTIONS
+        if len(sections[s]) < MIN_MANDATORY_CHARS
+    }
+    if truncated:
+        raise ValueError(
+            f"Mandatory sections truncated for {ticker} (< {MIN_MANDATORY_CHARS} chars): {truncated}"
+        )
     for opt in OPTIONAL_SECTIONS:
         if opt not in sections:
             log.warning("optional_section_missing", ticker=ticker, section=opt)
