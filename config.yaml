@@ -14,16 +14,26 @@ edgar:
   prefer_amended: true
 
 # Chunking
+# PRD-mandated 800/120. Honored by a long-context embedding model (nomic, 8192
+# max) so chunks are not truncated. chunk_size must stay below the embedding
+# model's max_seq_length below.
 chunking:
   chunk_size_tokens: 800
   chunk_overlap_tokens: 120
   sentence_splitter: nltk  # or pysbd
 
 # Embeddings
+# Long-context model chosen to honor the PRD's 800-token chunks (bge-small caps
+# at 512). nomic uses task prefixes: "search_document: " for stored passages and
+# "search_query: " for queries — applied at embed time only, not to stored text.
 embeddings:
-  model_name: "BAAI/bge-small-en-v1.5"
+  model_name: "nomic-ai/nomic-embed-text-v1.5"
+  dim: 768
+  max_seq_length: 2048
+  trust_remote_code: true
   normalize: true
-  query_instruction: "Represent this sentence for searching relevant passages: "
+  query_instruction: "search_query: "
+  document_instruction: "search_document: "
   batch_size_gpu: 64
   batch_size_cpu: 16
   device: auto  # auto | cuda | mps | cpu
@@ -32,7 +42,7 @@ embeddings:
 vector_store:
   type: chroma
   persist_dir: ".chroma"
-  collection_name: "pharma_10k_v384_bge_small"
+  collection_name: "pharma_10k_v768_nomic_v1_5"
 
 # Retrieval
 retrieval:

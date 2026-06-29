@@ -50,19 +50,62 @@ def run(verify: bool = False):
     print(f"\nIndex complete. Total chunks in store: {total}")
 
     if verify:
+        import math
+        from src.config import cfg
         print("\nVerification:")
         print(f"  Chunk count: {total}")
-        sample = store.query(embed.embed_query("risk factors"), top_k=3)
-        print(f"  Sample query returned {len(sample)} result(s)")
-        if sample:
-            print(f"  Top result: {sample[0]['metadata'].get('company')} — {sample[0]['metadata'].get('section')}")
-        print("  Re-run idempotency: upserting same chunks again (should add 0 new)...")
-        store.upsert_chunks(all_chunks, all_embeddings)
-        total_after = store.chunk_count()
-        if total_after != total:
-            print(f"  WARNING: chunk count changed {total} -> {total_after}")
+
+        # 1. Drop/collision detection: store count == unique produced ids.
+        produced_ids = {c.chunk_id for c in all_chunks}
+        if total != len(produced_ids):
+            print(f"  FAIL: store has {total} chunks but {len(produced_ids)} unique ids were produced (drops/collisions)")
             sys.exit(1)
-        print(f"  Count unchanged at {total}. M2 verification passed.")
+        print(f"  Unique produced ids: {len(produced_ids)} == store count")
+
+        # 2. No stale chunks: ids in the store must equal ids produced this run.
+        stored_ids = set(store.get_collection().get()["ids"])
+        stale = stored_ids - produced_ids
+        if stale:
+            print(f"  FAIL: {len(stale)} stale chunk(s) in store not produced this run (rebuild from scratch)")
+            sys.exit(1)
+        print("  No stale chunks in store")
+
+        # 3. Embedding sanity: correct dim, unit-norm, no NaN, on a sample.
+        dim = cfg["embeddings"].get("dim", 384)
+        sample_ids = list(produced_ids)[:: max(1, len(produced_ids) // 20)][:20]
+        got = store.get_collection().get(ids=sample_ids, include=["embeddings"])
+        for vec in got["embeddings"]:
+            if len(vec) != dim:
+                print(f"  FAIL: embedding dim {len(vec)} != {dim}")
+                sys.exit(1)
+            norm = math.sqrt(sum(x * x for x in vec))
+            if any(math.isnan(x) for x in vec) or not (0.9 < norm < 1.1):
+                print(f"  FAIL: embedding not unit-norm/has NaN (norm={norm:.3f})")
+                sys.exit(1)
+        print(f"  Embeddings OK: dim={dim}, unit-norm, no NaN (sampled {len(sample_ids)})")
+
+        # 4. Cross-pass idempotency: re-derive chunks from disk and confirm the
+        # chunk_id set is identical (deterministic chunking), then re-upsert and
+        # confirm zero count delta.
+        rederived = set()
+        for path in filing_files:
+            f2 = Filing(**json.loads(path.read_text()))
+            rederived.update(c.chunk_id for c in chunker.chunk_filing(f2))
+        if rederived != produced_ids:
+            print(f"  FAIL: re-derived chunk ids differ (non-deterministic chunking): "
+                  f"+{len(rederived - produced_ids)} / -{len(produced_ids - rederived)}")
+            sys.exit(1)
+        store.upsert_chunks(all_chunks, all_embeddings)
+        if store.chunk_count() != total:
+            print(f"  FAIL: re-upsert changed count {total} -> {store.chunk_count()}")
+            sys.exit(1)
+        print(f"  Idempotent: re-derived ids identical, count stable at {total}")
+
+        # 5. Relevance smoke test.
+        sample = store.query(embed.embed_query("What are the principal risk factors?"), top_k=3)
+        print(f"  Sample query returned {len(sample)} result(s); "
+              f"top: {sample[0]['metadata'].get('company')} — {sample[0]['metadata'].get('section')}" if sample else "  WARN: empty query result")
+        print("  M2 verification passed.")
 
 
 if __name__ == "__main__":

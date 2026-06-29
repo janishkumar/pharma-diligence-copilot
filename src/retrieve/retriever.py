@@ -8,12 +8,14 @@ TOP_K_DENSE = cfg["retrieval"]["top_k_dense"]
 HYBRID = cfg["retrieval"]["hybrid_enabled"]
 BM25_TOP_K = cfg["retrieval"]["bm25_top_k"]
 RRF_K = cfg["retrieval"]["rrf_k"]
+# Bound the fused candidate set handed to the reranker, matching the dense budget.
+RRF_TOP_K = max(TOP_K_DENSE, BM25_TOP_K)
 
 _bm25 = None
 _bm25_corpus: list[dict] = []
 
 
-def _rrf_fuse(dense: list[dict], keyword: list[dict], k: int = RRF_K) -> list[dict]:
+def _rrf_fuse(dense: list[dict], keyword: list[dict], k: int = RRF_K, top_k: int = RRF_TOP_K) -> list[dict]:
     scores: dict[str, float] = {}
     chunk_map: dict[str, dict] = {}
     for rank, item in enumerate(dense):
@@ -25,7 +27,7 @@ def _rrf_fuse(dense: list[dict], keyword: list[dict], k: int = RRF_K) -> list[di
         scores[cid] = scores.get(cid, 0.0) + 1.0 / (k + rank + 1)
         chunk_map[cid] = item
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    return [chunk_map[cid] for cid, _ in ranked]
+    return [chunk_map[cid] for cid, _ in ranked[:top_k]]
 
 
 def _bm25_search(query: str, top_k: int) -> list[dict]:
@@ -81,6 +83,14 @@ def _build_bm25_index():
     for doc_id, doc, meta in zip(all_docs["ids"], all_docs["documents"], all_docs["metadatas"]):
         _bm25_corpus.append({"chunk_id": doc_id, "text": doc, "metadata": meta, "score": 0.0})
         tokenized.append(tokenize(doc))
+
+    # BM25Okapi divides by the average document length and raises ZeroDivisionError
+    # on an empty/all-empty corpus. Leave the index unbuilt and let _bm25_search
+    # short-circuit on the empty corpus instead.
+    if not any(tokenized):
+        _bm25 = None
+        log.warning("bm25_index_empty", corpus_size=len(_bm25_corpus))
+        return
 
     _bm25 = BM25Okapi(tokenized)
     log.info("bm25_index_built", corpus_size=len(_bm25_corpus))

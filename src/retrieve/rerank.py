@@ -1,4 +1,12 @@
-import signal
+"""Cross-encoder reranking with a thread-safe timeout.
+
+The timeout must work when called from a server worker thread (FastAPI/uvicorn,
+Streamlit), so it uses concurrent.futures rather than signal.SIGALRM (which only
+works on the main thread and silently raised ValueError off it, bypassing the
+reranker on every API/UI call).
+"""
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
 from src.config import cfg
 from src.logging_setup import get_logger
 
@@ -12,6 +20,7 @@ SCORE_THRESHOLD = cfg["rerank"]["score_threshold"]
 
 _reranker = None
 _reranker_disabled = False
+_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rerank")
 
 
 def _load_reranker():
@@ -41,23 +50,21 @@ def rerank(query: str, candidates: list[dict]) -> list[dict]:
 
     pairs = [(query, c["text"]) for c in candidates]
 
+    # Thread-safe deadline: run predict on a worker and bound the wait. Works in
+    # any thread. A timed-out predict keeps running in the background but we
+    # return the dense order rather than block the request.
+    future = _executor.submit(reranker.predict, pairs)
     try:
-        def _handler(signum, frame):
-            raise TimeoutError("reranker timeout")
-
-        signal.signal(signal.SIGALRM, _handler)
-        signal.alarm(TIMEOUT)
-        try:
-            scores = reranker.predict(pairs)
-        finally:
-            signal.alarm(0)
-    except TimeoutError:
-        log.warning("reranker_timeout", fallback="dense_scores")
+        scores = future.result(timeout=TIMEOUT)
+    except FuturesTimeout:
+        log.warning("reranker_timeout", timeout_sec=TIMEOUT, fallback="dense_scores")
         return candidates[:TOP_N]
     except Exception as e:
-        log.warning("reranker_error", error=str(e), fallback="dense_scores")
+        # A genuine reranker failure is NOT a timeout — log loudly so it is not
+        # mistaken for the (acceptable) timeout fallback.
+        log.error("reranker_failed", error=str(e), fallback="dense_scores")
         return candidates[:TOP_N]
 
-    scored = [(score, chunk) for score, chunk in zip(scores, candidates) if score >= SCORE_THRESHOLD]
+    scored = [(float(score), chunk) for score, chunk in zip(scores, candidates) if score >= SCORE_THRESHOLD]
     scored.sort(key=lambda x: x[0], reverse=True)
     return [chunk for _, chunk in scored[:TOP_N]]

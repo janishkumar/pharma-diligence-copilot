@@ -57,6 +57,17 @@ def upsert_chunks(chunks: list[Chunk], embeddings: list[list[float]]):
     log.info("upserted", count=len(chunks))
 
 
+def _normalize_where(where: dict | None) -> dict | None:
+    """ChromaDB rejects a multi-key filter ({"ticker":..., "fiscal_year":...})
+    with an HTTP 500; it requires an explicit logical operator. Wrap any
+    multi-condition filter (without an existing $and/$or) in $and."""
+    if not where:
+        return None
+    if len(where) > 1 and not any(k.startswith("$") for k in where):
+        return {"$and": [{k: v} for k, v in where.items()]}
+    return where
+
+
 def query(
     embedding: list[float],
     top_k: int = 20,
@@ -64,9 +75,16 @@ def query(
 ) -> list[dict]:
     col = get_collection()
     kwargs = {"query_embeddings": [embedding], "n_results": top_k, "include": ["documents", "metadatas", "distances"]}
-    if where:
-        kwargs["where"] = where
-    results = col.query(**kwargs)
+    normalized = _normalize_where(where)
+    if normalized:
+        kwargs["where"] = normalized
+    try:
+        results = col.query(**kwargs)
+    except Exception as e:
+        # A malformed/unsupported filter must not 500 the request; degrade to
+        # empty so the caller's abstention path handles it.
+        log.warning("query_failed", error=str(e), where=normalized)
+        return []
     if not results["ids"] or not results["ids"][0]:
         return []
     out = []
