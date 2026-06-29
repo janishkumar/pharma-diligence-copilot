@@ -56,7 +56,9 @@ rerank:
   enabled: true
   model_name: "BAAI/bge-reranker-base"
   top_n: 5
-  timeout_sec: 2
+  # CPU cross-encoder predict over ~20 candidates takes ~2-3s, so a 2s timeout
+  # silently fell back to dense on most queries. 30s lets reranking actually apply.
+  timeout_sec: 30
   score_threshold: -2.0
 
 # Generation

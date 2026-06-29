@@ -61,6 +61,8 @@ class AskResponse(BaseModel):
     timing: TimingBreakdown
     model_version: str
     corpus_snapshot_hash: str
+    truncated: bool = False
+    error: Optional[str] = None
 
 
 class ErrorResponse(BaseModel):

@@ -129,7 +129,7 @@ def run():
 
     scorecard = {
         "timestamp": datetime.utcnow().isoformat(),
-        "model_version": results[0]["answer"] if results else "",
+        "model_version": f"{cfg['generation']['backend']}/{cfg['generation']['model']}",
         "seed": SEED,
         "n_questions": len(golden),
         "retrieval": {

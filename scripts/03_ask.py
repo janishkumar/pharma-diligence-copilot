@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """M3: Ask a question via CLI."""
 import argparse
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.pipeline import ask
-from src.generate.prompt import ABSTENTION_STRING
+# --local must switch the generator backend BEFORE importing the pipeline,
+# because generator.BACKEND is resolved at import time.
+if "--local" in sys.argv:
+    os.environ["GENERATOR_BACKEND_OVERRIDE"] = "ollama"
+
+from src.pipeline import ask  # noqa: E402
 
 
 def main():
@@ -19,10 +24,6 @@ def main():
     parser.add_argument("--local", action="store_true", help="Use local Ollama backend (Phase 2)")
     args = parser.parse_args()
 
-    if args.local:
-        import os
-        os.environ["GENERATOR_BACKEND_OVERRIDE"] = "ollama"
-
     filters = {}
     if args.company:
         filters["ticker"] = {"$eq": args.company.upper()}
@@ -31,14 +32,19 @@ def main():
 
     result = ask(args.question, filters=filters or None)
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print(result.answer)
-    print("="*60)
+    print("=" * 60)
 
-    if not result.abstained and result.citations:
+    if result.abstained:
+        print("\n[abstained — no grounded answer in the corpus]")
+    elif result.citations:
         print("\nSources:")
         for c in result.citations:
             print(f"  [{c.n}] {c.company} {c.fiscal_year} 10-K, {c.section}, chunk {c.chunk_id}")
+
+    if result.truncated:
+        print("\n[WARNING: answer was truncated at the token limit — it may be incomplete]")
 
     print(f"\nTiming: {result.timing.total_ms}ms total | Model: {result.model_version}")
 

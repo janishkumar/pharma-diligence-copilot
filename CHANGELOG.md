@@ -100,4 +100,56 @@ distribution, metadata completeness, all-companies/sections indexed, verbatim-te
 guard, relevance) + `test_m2_regressions.py` (rerank off-main-thread, no-signal,
 multi-key `$and` filter end-to-end).
 
-Next: M3 — RAG answer pipeline (retrieve → rerank → generate with citations).
+### M3 — RAG answer pipeline ✅ (2026-06-29)
+
+**Verification:** live end-to-end queries through Claude + `pytest tests/` → **49 passed, 1 skipped**.
+- Positive (Pfizer risk factors): grounded answer, citations map to real Item 1/1A chunks.
+- Positive (Moderna mRNA platform): grounded answer, 3 citations (Item 1 + Item 8).
+- Negative (Pfizer Bitcoin holdings): correctly abstains, 0 citations.
+
+**What M3 delivers:** `retrieve → rerank → generate` with inline `[n]` citations or abstention,
+returned as the `AskResponse` contract. CLI at `scripts/03_ask.py`.
+
+**Bug found during sanity-testing (before the audit):**
+- **Abstention undetected** — exact-equality check `answer == ABSTENTION_STRING` failed because
+  the model abstains *then helpfully elaborates*, so the phrase is a prefix. Replaced with robust
+  leading-phrase detection (`_is_abstention`, tolerant of quotes/markdown/elaboration).
+
+**Critical regression I introduced AND caught via live testing:**
+- Following audit finding #12 ("PRD §9.7 mandates top_p=0.95"), I added `top_p` to the Anthropic
+  call — but **Claude's API returns 400 if both `temperature` and `top_p` are sent**. My new error
+  handler then masked the 400 as an abstention, so *every* positive query silently "abstained"
+  (generation_ms ~400ms gave it away). Mocked unit tests passed; only a live query exposed it.
+  Fix: Anthropic sends temperature only (the determinism control); top_p stays on openai/ollama.
+  Locked with a regression test asserting the Anthropic call omits top_p.
+
+**M3 adversarial QA audit (3 lenses × verify) — 21/21 findings confirmed, fixed:**
+- **HIGH ungrounded answers passed silently** — a non-abstaining answer with zero valid citations was
+  returned as fact. Added a groundedness guard: refuse (abstain) when there are no valid citations.
+- **HIGH generator had no error handling** — any API error (rate limit, overload, network, 400)
+  crashed the request. Added bounded retry+backoff on transient errors, empty-content guards, and
+  graceful degradation; generation failures now surface a distinct `error` (not a fake abstention).
+- **HIGH no §19.3 answer-quality tests** — added 18 API-free tests (citation parsing across
+  [1][2]/[1,2]/[1-3]/double-digit/out-of-range, abstention detection, groundedness guard, error
+  surfacing, top_p regression).
+- **MEDIUM citation parser** — only matched adjacent `[n]`; grouped `[1,2]`/`[1-3]` parsed to ZERO
+  citations (a correctly-cited answer looked unsupported, and corrupted eval recall). Rewrote
+  `_parse_citations` with a regex that expands comma/range groups and validates 1..len(chunks);
+  out-of-range markers (e.g. `[10]`) are logged, not silently dropped.
+- **MEDIUM** missing `top_p` on Anthropic (see regression above — resolved by sending temperature only);
+  truncation now detected via `stop_reason` and flagged (`AskResponse.truncated`).
+- **MEDIUM rerank 2s timeout** — CPU cross-encoder predict (~2.5s) exceeded it, silently falling back to
+  dense on most queries. Raised to 30s so reranking actually applies.
+- **LOW** dead `--local` flag (now sets the backend override before import); `_corpus_snapshot_hash`
+  memoized (was rglob-ing 85MB every query); eval scorecard `model_version` bug (was storing answer text).
+
+**Deferred (documented):**
+- **Full per-session cost-budget enforcement** — token usage + USD cost are now captured per call in
+  `GenerationResult`, but not yet accumulated/halted against `COST_BUDGET_USD` or surfaced in
+  `AskResponse`. Enforcement is a follow-up; usage is observable in logs.
+- **Reranker pre-warm** — first query still pays the one-time cross-encoder load (~20s) inside
+  `rerank_ms`; a startup warm-up is deferred to M5 (server boot).
+- **Content-based corpus hash** — snapshot hash is mtime-based (not reproducible across machines);
+  acceptable for a single-host v1.
+
+Next: M4 — evaluation harness (golden set + scorecard: retrieval recall, faithfulness, abstention).
