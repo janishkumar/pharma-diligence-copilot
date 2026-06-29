@@ -16,6 +16,12 @@ MAX_SEQ_LENGTH = cfg["embeddings"].get("max_seq_length")
 
 
 def _get_device() -> str:
+    # EMBED_DEVICE env var overrides config — used to force CPU for large batch
+    # indexing, since nomic on Apple MPS can hang on long-sequence batches.
+    import os
+    override = os.getenv("EMBED_DEVICE")
+    if override:
+        return override
     setting = cfg["embeddings"]["device"]
     if setting != "auto":
         return setting

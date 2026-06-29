@@ -41,4 +41,63 @@ Ran an independent multi-agent audit (data-quality, code-correctness, PRD-compli
 
 **Tests added:** `test_source_url_present`, `test_raw_cache_exists_and_checksum_stable`, `test_no_boilerplate_prefix`. Full suite: **21 passed, 1 skipped** (Phase 2).
 
-Next: M2 Index — chunk, embed, store in ChromaDB.
+### M2 — Index ✅ (2026-06-29)
+
+**Verification:** `python scripts/02_index.py --verify` → passed (drop/stale/embedding-norm/idempotency). `pytest tests/` → **34 passed, 1 skipped** (Phase 2).
+
+**Numbers:**
+- 1,582 chunks across all 12 filings, stored in ChromaDB (cosine), 85 MB on disk.
+- Chunk size 800 tokens / 120 overlap (PRD-mandated), avg ~well within the model limit, 0 chunks truncated.
+- Embeddings: nomic-embed-text-v1.5, 768-dim, unit-norm, no NaN.
+- Idempotent: re-derived chunk ids identical across passes; re-upsert count delta 0.
+- Relevance smoke test: "principal risk factors" → top hit Regeneron Item 1A.
+
+**Decision (user-approved PRD deviation):** the PRD mandates 800-token chunks, but
+`bge-small-en-v1.5` caps at 512, so 800-token chunks would be silently truncated at
+embed time. Switched the embedder to **nomic-embed-text-v1.5** (8192-token context,
+768-dim) to honor the literal 800/120. Adds `search_document:`/`search_query:` task
+prefixes (applied at embed time only; stored text stays verbatim) and `trust_remote_code`.
+Collection renamed `pharma_10k_v768_nomic_v1_5`.
+
+**Critical chunker bugs found and fixed before indexing:**
+1. **Verbatim-text corruption** — chunks were built via `tokenizer.decode(token_ids)`
+   on the UNCASED bge tokenizer, which lowercased and mangled punctuation
+   ("U.S." → "u. s.", "12%" → "12 %"). Since stored chunk text is shown in
+   citations and fed to the LLM, this poisoned everything downstream. Rewrote
+   chunking to slice the ORIGINAL text by sentence boundaries, using the tokenizer
+   only to MEASURE token counts.
+2. **800 > 512 truncation** — see decision above.
+
+**M2 adversarial QA audit (3 lenses × verify) — 11/12 findings confirmed, all fixed:**
+- **HIGH reranker silently bypassed** — used `signal.SIGALRM`, which only works on the
+  main thread, so it raised `ValueError` (caught as a generic error) under FastAPI/
+  Streamlit worker threads. Replaced with a `ThreadPoolExecutor` timeout; genuine
+  failures now logged distinctly from timeouts.
+- **HIGH multi-key filter 500** — a `{ticker, fiscal_year}` ChromaDB filter (exactly
+  what the UI builds) crashed with HTTP 500; ChromaDB needs an explicit `$and`.
+  `store.query` now wraps multi-condition filters in `$and` and degrades to empty on
+  any query error instead of propagating a 500.
+- **MEDIUM overlap silently dropped to 0** — the reverse-walk carry broke before adding
+  any sentence when a boundary sentence exceeded the overlap budget (~18% of in-section
+  pairs had zero overlap). Added a token-tail fallback; zero-overlap pairs dropped to ~6%
+  (residual are hard-split boundaries).
+- **MEDIUM degenerate chunks** — 3–21-token fragments were embedded standalone. Added a
+  min-chunk-size merge (also fixes the orphan-before-hard-split LOW finding).
+- **MEDIUM `--verify` was a no-op** — re-upserting the same objects could never change the
+  count. Replaced with real invariants: drop/collision detection, stale-chunk detection,
+  embedding dim/norm/NaN sanity, and cross-pass idempotency (re-derive ids from disk).
+- **LOW** BM25 `ZeroDivisionError` on an empty corpus (guarded); RRF returned an uncapped
+  union to the reranker (now capped at `max(top_k_dense, bm25_top_k)`).
+- **Rejected (1):** cross-encoder `score_threshold=-2.0` flagged as arbitrary — verifier
+  judged it acceptable; left as-is.
+
+**Infra note:** nomic on Apple **MPS hangs** on long-sequence batches (froze at 0% CPU
+mid-embed). Added an `EMBED_DEVICE` env override and ran the index build on **CPU**
+(reliable). Runtime single-query embedding still uses the configured device.
+
+**Tests added:** chunk-level §19.1 checks in `test_retrieval.py` (dedup, size
+distribution, metadata completeness, all-companies/sections indexed, verbatim-text
+guard, relevance) + `test_m2_regressions.py` (rerank off-main-thread, no-signal,
+multi-key `$and` filter end-to-end).
+
+Next: M3 — RAG answer pipeline (retrieve → rerank → generate with citations).
