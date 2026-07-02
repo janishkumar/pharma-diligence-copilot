@@ -1,17 +1,136 @@
 [
   {
     "id": "gs_001",
-    "question": "What are Pfizer's stated principal risk factors?",
-    "reference_answer": "",
-    "expected_sources": [{"company": "Pfizer", "year": 2024, "section": "Item 1A"}],
+    "question": "What are Pfizer's principal risk factors?",
+    "ticker": "PFE",
+    "expected_sections": ["Item 1A"],
+    "reference_answer": "Pricing and reimbursement pressure (payors, IRA), declining COVID-19 product demand, competition and loss of exclusivity, regulatory and manufacturing risks.",
     "question_type": "factual",
     "should_abstain": false
   },
   {
     "id": "gs_002",
-    "question": "What is the company's stated exposure to quantum-computing supply-chain risk?",
+    "question": "Which Eli Lilly products generated more than $3 billion in revenue?",
+    "ticker": "LLY",
+    "expected_sections": ["Item 7", "Item 1"],
+    "reference_answer": "Mounjaro, Zepbound, Verzenio, Trulicity, Taltz, and Jardiance each generated more than $3 billion in revenue.",
+    "question_type": "numeric",
+    "should_abstain": false
+  },
+  {
+    "id": "gs_003",
+    "question": "How does AbbVie describe Humira biosimilar competition?",
+    "ticker": "ABBV",
+    "expected_sections": ["Item 1A", "Item 7"],
+    "reference_answer": "Humira faces direct biosimilar competition in the U.S. (since 2023), driving significant erosion of Humira revenue.",
+    "question_type": "factual",
+    "should_abstain": false
+  },
+  {
+    "id": "gs_004",
+    "question": "What does Moderna say about its mRNA technology platform?",
+    "ticker": "MRNA",
+    "expected_sections": ["Item 1"],
+    "reference_answer": "Moderna describes an mRNA technology platform underpinning Spikevax and a pipeline of mRNA medicines and vaccines.",
+    "question_type": "factual",
+    "should_abstain": false
+  },
+  {
+    "id": "gs_005",
+    "question": "What are Vertex's main approved cystic fibrosis products?",
+    "ticker": "VRTX",
+    "expected_sections": ["Item 1"],
+    "reference_answer": "TRIKAFTA/Kaftrio, plus KALYDECO, SYMDEKO, and ORKAMBI; Vertex also markets CASGEVY.",
+    "question_type": "factual",
+    "should_abstain": false
+  },
+  {
+    "id": "gs_006",
+    "question": "What is Merck's largest product and key growth driver?",
+    "ticker": "MRK",
+    "expected_sections": ["Item 1", "Item 7"],
+    "reference_answer": "KEYTRUDA (pembrolizumab) is Merck's largest product and primary growth driver.",
+    "question_type": "factual",
+    "should_abstain": false
+  },
+  {
+    "id": "gs_007",
+    "question": "What operating segments does Johnson & Johnson report?",
+    "ticker": "JNJ",
+    "expected_sections": ["Item 1", "Item 7"],
+    "reference_answer": "Two segments: Innovative Medicine (pharmaceuticals) and MedTech (medical devices).",
+    "question_type": "factual",
+    "should_abstain": false
+  },
+  {
+    "id": "gs_008",
+    "question": "What does Gilead say about its HIV franchise?",
+    "ticker": "GILD",
+    "expected_sections": ["Item 1", "Item 7"],
+    "reference_answer": "HIV is Gilead's core franchise, led by Biktarvy, spanning treatment and prevention (PrEP).",
+    "question_type": "factual",
+    "should_abstain": false
+  },
+  {
+    "id": "gs_009",
+    "question": "What are Amgen's principal risk factors?",
+    "ticker": "AMGN",
+    "expected_sections": ["Item 1A"],
+    "reference_answer": "Pricing/reimbursement pressure (including IRA), competition and biosimilars, manufacturing and supply, and regulatory risk.",
+    "question_type": "factual",
+    "should_abstain": false
+  },
+  {
+    "id": "gs_010",
+    "question": "Which companies does Regeneron collaborate with on key products?",
+    "ticker": "REGN",
+    "expected_sections": ["Item 1"],
+    "reference_answer": "Sanofi (e.g., Dupixent, Libtayo) and Bayer (e.g., EYLEA outside the U.S.).",
+    "question_type": "factual",
+    "should_abstain": false
+  },
+  {
+    "id": "gs_011",
+    "question": "What are Bristol Myers Squibb's key marketed products?",
+    "ticker": "BMY",
+    "expected_sections": ["Item 1", "Item 7"],
+    "reference_answer": "Eliquis, Opdivo, and growth products such as Breyanzi, Camzyos, and Reblozyl.",
+    "question_type": "factual",
+    "should_abstain": false
+  },
+  {
+    "id": "gs_012",
+    "question": "What does Biogen say about its Alzheimer's disease product Leqembi?",
+    "ticker": "BIIB",
+    "expected_sections": ["Item 1", "Item 7"],
+    "reference_answer": "Leqembi (lecanemab), partnered with Eisai, is an approved Alzheimer's treatment Biogen is commercializing.",
+    "question_type": "factual",
+    "should_abstain": false
+  },
+  {
+    "id": "gs_013",
+    "question": "What is Pfizer's cryptocurrency and Bitcoin strategy?",
+    "ticker": "PFE",
+    "expected_sections": [],
     "reference_answer": "",
-    "expected_sources": [],
+    "question_type": "negative",
+    "should_abstain": true
+  },
+  {
+    "id": "gs_014",
+    "question": "How many electric vehicles did Johnson & Johnson manufacture this year?",
+    "ticker": "JNJ",
+    "expected_sections": [],
+    "reference_answer": "",
+    "question_type": "negative",
+    "should_abstain": true
+  },
+  {
+    "id": "gs_015",
+    "question": "What is Moderna's quantum computing research roadmap?",
+    "ticker": "MRNA",
+    "expected_sections": [],
+    "reference_answer": "",
     "question_type": "negative",
     "should_abstain": true
   }

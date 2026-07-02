@@ -152,4 +152,61 @@ returned as the `AskResponse` contract. CLI at `scripts/03_ask.py`.
 - **Content-based corpus hash** — snapshot hash is mtime-based (not reproducible across machines);
   acceptable for a single-host v1.
 
-Next: M4 — evaluation harness (golden set + scorecard: retrieval recall, faithfulness, abstention).
+### M5 (partial) — UI improvements + retrieval-scoping fix (2026-06-29)
+
+Pulled forward from M5 after live user testing exposed a real defect:
+
+- **Cross-company retrieval contamination** — unscoped questions ("Vertex's products?",
+  "Eli Lilly's risks?") retrieved chunks from OTHER issuers because generic 10-K language
+  embeds nearly identically across filings. The model behaved honestly (refused or flagged
+  the mismatch) but the UX was broken. Fix: **deterministic company auto-detection**
+  (`src/retrieve/company_filter.py`) — an alias map over the 12 known issuers applied in
+  the pipeline when the caller didn't pin a ticker; explicit filters always win; zero or
+  multiple matches → no filter (cross-company questions still work). 9 unit tests.
+- **UI (`src/ui.py`)**: fixed `ModuleNotFoundError` under `streamlit run` (sys.path);
+  starter example questions; newest-first history with latest expanded + Clear button;
+  auto-scope indicator; distinct error/abstention/truncation states.
+
+### M4 — Evaluation harness ✅ (2026-07-02)
+
+**Verification:** `python scripts/04_eval.py` on a 15-question golden set → **Phase-1 PASS**.
+`pytest tests/` → **58 passed, 1 skipped**.
+
+**Harness (scripts/04_eval.py):**
+- Golden set `eval/golden_set_v1.json`: 15 questions across all 12 issuers (11 factual,
+  1 numeric, 3 abstention traps), written against verified filing content.
+- **Retrieval-trace plumbing** (`ask(_trace=)`) — recall and the judge now measure what was
+  *actually retrieved*, not just what was cited (the scaffold's recall was circular: it
+  measured cited chunks, so it couldn't see retrieval misses at all).
+- Section-level recall@5/10/20; GPT-4o judge (groundedness/relevance/correctness) fed the
+  FULL reranked context the generator saw; abstention accuracy; **answer-rate metric**
+  exposing false abstentions (which the groundedness average silently excludes);
+  **resumable checkpointing** (`_partial.jsonl`) after repeated session-teardown kills.
+
+**Baseline → tuned (top_k_dense 20→30, rerank top_n 5→8):**
+
+| metric | baseline | tuned |
+|---|---|---|
+| groundedness | 0.95 | **0.9909** |
+| answer rate | (2 hidden false abstentions) | **0.9167** (11/12) |
+| recall@5 / @10 | 0.9167 / 1.0 | 0.9167 / 1.0 |
+| correctness | 0.917 | 0.831* |
+| abstention accuracy | 3/3 | 3/3 |
+
+\* Correctness "drop" is composition: baseline excluded 2 abstained questions from scoring;
+tuned answers one of them imperfectly, so more of reality is being scored.
+
+**What the eval caught (validating the M4-first decision):**
+- The Vertex partial-fabrication (groundedness 0.5 at baseline) — **resolved by the tuning** (→0.99 aggregate).
+- Two false abstentions on answerable questions (LLY $3B products, BMS key products) hidden
+  by the old metrics — BMS fixed by tuning; **LLY `gs_002` remains** (the exact fact-bearing
+  chunk still doesn't reach the model).
+- Amgen risk-factors: Item 1A never lands in the dense top-5 (`recall@5=0`) — k-tuning can't fix
+  ordering, only depth.
+
+**Known limitation / next lever (documented, deferred):** both residual failures share one root
+cause — pure semantic retrieval misses exact-phrase/section targets. The scaffolded **hybrid
+BM25 + RRF** path (`hybrid_enabled: false`) is the targeted fix, to be enabled and re-measured
+as its own change.
+
+Next: M5 — interfaces (FastAPI + Streamlit hardening, reranker pre-warm at boot).

@@ -8,6 +8,7 @@ from src.generate import generator
 from src.generate.prompt import ABSTENTION_STRING
 from src.logging_setup import get_logger
 from src.retrieve import retriever, rerank
+from src.retrieve.company_filter import apply_auto_company_filter
 from src.schemas import AskResponse, Citation, TimingBreakdown
 
 log = get_logger("pipeline")
@@ -92,8 +93,17 @@ def _parse_citations(answer: str, chunks: list[dict]) -> tuple[list[Citation], l
     return citations, out_of_range
 
 
-def ask(question: str, filters: dict | None = None) -> AskResponse:
+def ask(question: str, filters: dict | None = None, _trace: dict | None = None) -> AskResponse:
+    """Answer a question. Pass a dict as `_trace` to capture the retrieval trace
+    (dense candidates + reranked chunks) for evaluation — recall@k and the
+    faithfulness judge must measure what was actually retrieved, not just cited."""
     t0 = time.time()
+
+    # Scope to a single named company when the caller didn't pin one. Prevents
+    # an unscoped "Vertex products?" from retrieving other issuers' chunks.
+    filters, auto_ticker = apply_auto_company_filter(question, filters)
+    if auto_ticker:
+        log.info("auto_company_filter", ticker=auto_ticker)
 
     t_ret = time.time()
     candidates = retriever.retrieve(question, filters=filters)
@@ -102,6 +112,15 @@ def ask(question: str, filters: dict | None = None) -> AskResponse:
     t_rer = time.time()
     top_chunks = rerank.rerank(question, candidates)
     rerank_ms = int((time.time() - t_rer) * 1000)
+
+    if _trace is not None:
+        _trace["candidates"] = [
+            {"chunk_id": c.get("chunk_id"), "ticker": c.get("metadata", {}).get("ticker"),
+             "section": c.get("metadata", {}).get("section")}
+            for c in candidates
+        ]
+        _trace["reranked"] = top_chunks  # full dicts incl. text, for the judge
+        _trace["auto_ticker"] = auto_ticker
 
     t_gen = time.time()
     truncated = False
