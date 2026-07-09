@@ -1,0 +1,23 @@
+{
+  "raw_pairs": 2241,
+  "accepted": 2026,
+  "train": 1857,
+  "test": 169,
+  "rejects": {
+    "short_answer": 0,
+    "copy_paste": 23,
+    "low_overlap": 185,
+    "short_question": 0,
+    "bad_type": 0,
+    "dup": 7
+  },
+  "type_counts": {
+    "factual": 406,
+    "risk": 642,
+    "financial": 392,
+    "summarization": 178,
+    "comparative": 306,
+    "concentration": 102
+  },
+  "session_cost_usd": 0.0
+}

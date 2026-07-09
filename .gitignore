@@ -21,6 +21,12 @@ data/finetune/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/finetune/.gitkeep
+# The synthetic datasets cost real API money to regenerate and M7 needs them
+# on the training box — keep them in the repo (public filing text only).
+!data/finetune/train_v1.jsonl
+!data/finetune/test_v1.jsonl
+!data/finetune/test_v1_for_review.md
+!data/finetune/gen_stats.json
 .chroma/
 
 # Models (large binaries; produced in Phase 2)

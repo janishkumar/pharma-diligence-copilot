@@ -251,4 +251,36 @@ a mid-run click (inherent; not worth fighting v1); `AskResponse.error/truncated`
 additive extensions to §14.2; no rate limiting (local-only, single user).
 
 **Phase 1 complete: M1–M5 all verified.**
-Next: Phase 2 — M6 synthetic training data, M7 fine-tune (Azure A100), M8 local serve (Ollama).
+
+## Session 2 — Phase 2
+
+### M6 — Synthetic training data ✅ (2026-07-09)
+
+**Verification:** `python finetune/gen_synthetic.py --verify` → all PASS. `pytest tests/` →
+**70 passed, 0 skipped** (the §19.4 leakage test is now active and green).
+
+**Numbers:**
+- 749 chunks processed (60 source-separated test + 689 train) with the PRD §11.1 verbatim
+  prompt against claude-sonnet-4-6; ~$8 spend (halted at the configured ceiling per §«cost
+  budget»; the halt still cleared every target).
+- 2,241 raw pairs → **2,026 accepted**: **1,857 train** (≥1,500 ✓) / **169 test** (≥80 ✓).
+- Filters rejected 215: 185 low token-overlap (potential ungrounded content — the filter
+  doing its real job), 23 copy-paste, 7 near-duplicate questions (cosine > 0.95).
+- Diversity: all 6 question types, max share 32% (risk) ≤ 50% ✓. 0 question overlap,
+  0 source-chunk overlap (train and test come from disjoint chunks). Every record labeled
+  `provenance: synthetic/claude-sonnet-4-6` (§16).
+- §11.2 RAG framing: each record = question + source chunk context + grounded answer.
+
+**Bug found and fixed:** the cost-ceiling halt cancelled queued futures, then the collection
+loop called `.result()` on a cancelled future → `CancelledError` crash before the dataset
+build. Checkpoint made it a non-event: fixed the loop, rebuilt from `raw_pairs.jsonl` with
+zero new API calls.
+
+**Datasets committed** (`train_v1.jsonl` 8.1MB, `test_v1.jsonl` 780KB — public filing text
+only; $8 to regenerate and M7 needs them on the training box).
+
+**⏳ Human gate open:** the PRD requires the user to review/approve the test set
+(`data/finetune/test_v1_for_review.md`, 169 pairs) **before M7 training starts**.
+
+Next: M7 — QLoRA fine-tune of Qwen2.5-7B-Instruct on Azure A100 (blocked on test-set
+approval + Azure GPU provisioning/quota).
