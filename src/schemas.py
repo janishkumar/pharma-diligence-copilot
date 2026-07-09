@@ -40,6 +40,9 @@ class Citation(BaseModel):
     section: str
     chunk_id: str
     source_url: str
+    # Leading text of the cited chunk so interfaces can show the actual source
+    # passage (PRD §9.8 expandable source chunks), not just metadata.
+    snippet: str = ""
 
 
 class AskRequest(BaseModel):

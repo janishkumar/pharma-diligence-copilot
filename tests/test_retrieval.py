@@ -35,6 +35,20 @@ def test_empty_filter_does_not_widen():
         assert result == [], "Empty filtered result must return empty, not silently widen"
 
 
+def test_bm25_leg_respects_metadata_filters():
+    """Latent hybrid bug: the BM25 leg ignored metadata filters, so enabling
+    hybrid would silently bypass the ticker scope (cross-company bleed)."""
+    from src.retrieve.retriever import _matches_filters
+    pfe = {"ticker": "PFE", "fiscal_year": 2025}
+    mrk = {"ticker": "MRK", "fiscal_year": 2025}
+    f = {"ticker": {"$eq": "PFE"}}
+    assert _matches_filters(pfe, f)
+    assert not _matches_filters(mrk, f)
+    # $in and multi-key
+    assert _matches_filters(pfe, {"ticker": {"$in": ["PFE", "MRK"]}})
+    assert not _matches_filters(mrk, {"ticker": {"$eq": "MRK"}, "fiscal_year": {"$eq": 2024}})
+
+
 def test_chunk_size_within_embedding_limit():
     """Configured chunk size must fit the embedding model's max_seq_length, else
     chunks are silently truncated at embed time. Regression guard for the

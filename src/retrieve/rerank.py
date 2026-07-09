@@ -4,7 +4,15 @@ The timeout must work when called from a server worker thread (FastAPI/uvicorn,
 Streamlit), so it uses concurrent.futures rather than signal.SIGALRM (which only
 works on the main thread and silently raised ValueError off it, bypassing the
 reranker on every API/UI call).
+
+Concurrency: predict() is serialized by a lock (torch modules are not safe for
+concurrent forward passes), acquired with a timeout so a hung predict degrades
+later requests to the dense fallback instead of wedging them forever. Each call
+gets its own single-use executor — a shared 1-worker pool would be permanently
+occupied by one hung predict, silently disabling reranking for the process
+lifetime. A hung call leaks one thread (bounded, logged), nothing more.
 """
+import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
 from src.config import cfg
@@ -20,7 +28,7 @@ SCORE_THRESHOLD = cfg["rerank"]["score_threshold"]
 
 _reranker = None
 _reranker_disabled = False
-_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rerank")
+_predict_lock = threading.Lock()
 
 
 def _load_reranker():
@@ -50,11 +58,23 @@ def rerank(query: str, candidates: list[dict]) -> list[dict]:
 
     pairs = [(query, c["text"]) for c in candidates]
 
-    # Thread-safe deadline: run predict on a worker and bound the wait. Works in
-    # any thread. A timed-out predict keeps running in the background but we
-    # return the dense order rather than block the request.
-    future = _executor.submit(reranker.predict, pairs)
+    # Serialize predicts; a hung predict keeps the lock until it actually ends,
+    # so later requests fall back to dense (never a concurrent forward pass).
+    if not _predict_lock.acquire(timeout=TIMEOUT):
+        log.warning("reranker_busy", timeout_sec=TIMEOUT, fallback="dense_scores")
+        return candidates[:TOP_N]
+
+    def _run():
+        # The lock is released HERE, when predict truly finishes — not by the
+        # caller on timeout, which would allow a second concurrent predict.
+        try:
+            return reranker.predict(pairs)
+        finally:
+            _predict_lock.release()
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rerank")
     try:
+        future = executor.submit(_run)
         scores = future.result(timeout=TIMEOUT)
     except FuturesTimeout:
         log.warning("reranker_timeout", timeout_sec=TIMEOUT, fallback="dense_scores")
@@ -64,6 +84,8 @@ def rerank(query: str, candidates: list[dict]) -> list[dict]:
         # mistaken for the (acceptable) timeout fallback.
         log.error("reranker_failed", error=str(e), fallback="dense_scores")
         return candidates[:TOP_N]
+    finally:
+        executor.shutdown(wait=False)
 
     scored = [(float(score), chunk) for score, chunk in zip(scores, candidates) if score >= SCORE_THRESHOLD]
     scored.sort(key=lambda x: x[0], reverse=True)

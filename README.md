@@ -15,11 +15,18 @@ pip install -r requirements.txt
 
 python scripts/00_check_env.py   # validate environment before anything else
 python scripts/01_ingest.py      # M1: fetch and parse filings
-python scripts/02_index.py       # M2: chunk, embed, store
-python scripts/03_ask.py "What are Pfizer's principal risk factors?"  # M3: RAG answer
-python scripts/04_eval.py        # M4: evaluation scorecard
-uvicorn src.api:app --reload     # M5: API
-streamlit run src/ui.py          # M5: demo UI
+EMBED_DEVICE=cpu python scripts/02_index.py --verify   # M2: chunk, embed, store
+EMBED_DEVICE=cpu python scripts/03_ask.py "What are Pfizer's principal risk factors?"  # M3
+EMBED_DEVICE=cpu python scripts/04_eval.py             # M4: evaluation scorecard
+
+# M5 interfaces — bind to localhost only (D5: local, no auth)
+EMBED_DEVICE=cpu uvicorn src.api:app --host 127.0.0.1 --port 8000
+EMBED_DEVICE=cpu streamlit run src/ui.py --server.address 127.0.0.1
+```
+
+Note: `EMBED_DEVICE=cpu` is required on Apple Silicon — the nomic embedder hangs
+on MPS for long-sequence batches. Single queries are still fast on CPU.
+```bash
 ```
 
 ## Milestones

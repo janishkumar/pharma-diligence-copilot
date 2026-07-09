@@ -209,4 +209,46 @@ cause — pure semantic retrieval misses exact-phrase/section targets. The scaff
 BM25 + RRF** path (`hybrid_enabled: false`) is the targeted fix, to be enabled and re-measured
 as its own change.
 
-Next: M5 — interfaces (FastAPI + Streamlit hardening, reranker pre-warm at boot).
+### M5 — Interfaces ✅ (2026-07-09)
+
+**Verification:** API live on 127.0.0.1:8000 — `/health` readiness (`{"status":"ok","index_chunks":1582,"reranker_available":true}`), real cited `/ask` (Gilead HIV, 4 citations w/ snippets, 14.6s), 422/413/invalid-filter all returning the §14.2 ErrorResponse contract. `pytest tests/` → **69 passed, 1 skipped**.
+
+**Service (`src/api.py`, rewritten from the never-run scaffold):**
+- **Pre-warm at startup** (embedder + reranker in lifespan) — first request no longer pays the
+  ~25s cold-load; measured retrieval on request #1 dropped ~3.5s → 266ms. Lifespan failures now
+  emit structured logs (embedder → fail fast; reranker → logged dense-only degradation).
+- **Uniform §14.2 error contract** — 413/422/500/502 all return error_code/message/request_id;
+  internal details and submitted input are logged server-side, never echoed (the default FastAPI
+  422 leaked the full input back).
+- **Strict filter validation** — whitelisted keys with typed `$eq`/`$in` shapes and bounded list
+  sizes ($in ≤ 12 tickers / 10 years); malformed values on known keys are rejected 422, not
+  silently dropped. 32KB request-body cap (was: a 20MB body with a 200k-element `$in` was accepted).
+- **Real `/health`** — reports index chunk count + reranker availability, not a static "ok".
+
+**M5 adversarial audit — 19 candidates; 4 agent-verified, the other 15 verifier agents hit the
+session usage limit, so I triaged those against the code myself. Fixed:**
+- **HIGH shared 1-worker rerank executor** — one hung predict would occupy the pool forever,
+  silently disabling reranking process-wide (and serializing all requests through one queue).
+  Replaced with per-call executors plus a predict lock that is released by the worker when
+  predict *actually* finishes — a hung predict degrades later requests to dense fallback but
+  can never run concurrently with a new predict or wedge the process.
+- **Thread-safety** — encode/predict are torch forward passes called from uvicorn's 40-thread
+  pool with no synchronization; added an encode lock in `embed.py`.
+- **Latent hybrid bug (agent-confirmed)** — the BM25 leg ignored metadata filters, so enabling
+  `hybrid_enabled` would have silently bypassed ticker scoping (cross-company bleed again).
+  BM25 results now post-filtered by the same filter shape; regression test added.
+- **PRD §18 audit trail** — implemented `logs/queries.jsonl` (timestamp, question, filters,
+  auto-ticker, outcome, citation ids, timings, model, corpus hash); write failures never break
+  a request. **PRD §9.8** — citations now carry a 500-char source `snippet`; the UI expander
+  shows the actual cited passage, not just metadata.
+- **UI** — ask() wrapped (no tracebacks with internal paths rendered to the browser); auto-scope
+  recorded at query time (was recomputed against live sidebar state, mislabeling history);
+  invalid fiscal year stops the query instead of running unscoped; history capped at 20.
+- **D5 "local only"** — launch commands and README now bind API and UI to 127.0.0.1.
+
+**Accepted/deferred (documented):** Streamlit's rerun model can abandon an in-flight answer on
+a mid-run click (inherent; not worth fighting v1); `AskResponse.error/truncated` are intentional
+additive extensions to §14.2; no rate limiting (local-only, single user).
+
+**Phase 1 complete: M1–M5 all verified.**
+Next: Phase 2 — M6 synthetic training data, M7 fine-tune (Azure A100), M8 local serve (Ollama).

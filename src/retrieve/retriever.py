@@ -96,6 +96,22 @@ def _build_bm25_index():
     log.info("bm25_index_built", corpus_size=len(_bm25_corpus))
 
 
+def _matches_filters(meta: dict, filters: dict) -> bool:
+    """Apply the flat {key: {"$eq": v} | {"$in": [...]}} filter shape to a chunk's
+    metadata. The BM25 leg must honor the same scoping as the dense leg, or
+    enabling hybrid silently bypasses the ticker filter (cross-company bleed)."""
+    for key, cond in filters.items():
+        val = meta.get(key)
+        if isinstance(cond, dict):
+            if "$eq" in cond and val != cond["$eq"]:
+                return False
+            if "$in" in cond and val not in cond["$in"]:
+                return False
+        elif val != cond:
+            return False
+    return True
+
+
 def retrieve(query: str, filters: dict | None = None) -> list[dict]:
     q_emb = embed.embed_query(query)
 
@@ -110,5 +126,7 @@ def retrieve(query: str, filters: dict | None = None) -> list[dict]:
         return dense_results
 
     keyword_results = _bm25_search(query, BM25_TOP_K)
+    if where:
+        keyword_results = [r for r in keyword_results if _matches_filters(r["metadata"], where)]
     fused = _rrf_fuse(dense_results, keyword_results)
     return fused

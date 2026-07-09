@@ -1,6 +1,9 @@
 import hashlib
+import json
 import re
+import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.config import cfg, PROJECT_ROOT
@@ -39,6 +42,20 @@ def _extract_marker_numbers(answer: str) -> list[int]:
                 if n not in seen:
                     seen.append(n)
     return seen
+
+
+# PRD §18: append-only per-query audit trail.
+QUERIES_LOG = PROJECT_ROOT / "logs" / "queries.jsonl"
+_audit_lock = threading.Lock()
+
+
+def _audit(record: dict) -> None:
+    try:
+        QUERIES_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with _audit_lock, open(QUERIES_LOG, "a") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception as e:  # the audit trail must never break a request
+        log.warning("audit_write_failed", error=str(e)[:120])
 
 
 _snapshot_hash_cache: str | None = None
@@ -87,6 +104,7 @@ def _parse_citations(answer: str, chunks: list[dict]) -> tuple[list[Citation], l
                 section=meta.get("section", ""),
                 chunk_id=chunks[n - 1].get("chunk_id", ""),
                 source_url=meta.get("source_url", ""),
+                snippet=(chunks[n - 1].get("text") or "")[:500],
             ))
         else:
             out_of_range.append(n)
@@ -140,6 +158,13 @@ def ask(question: str, filters: dict | None = None, _trace: dict | None = None) 
     # content abstention (which would wrongly imply the corpus lacks the answer).
     if gen_error:
         log.error("generation_error_surfaced", error=gen_error[:160])
+        _audit({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "question": question, "filters": filters, "auto_ticker": auto_ticker,
+            "outcome": "generation_error", "error": gen_error[:200],
+            "total_ms": total_ms, "model_version": MODEL_VERSION,
+            "corpus_snapshot_hash": _corpus_snapshot_hash(),
+        })
         return AskResponse(
             answer="The system was unable to generate an answer due to a generation error. Please try again.",
             citations=[],
@@ -184,6 +209,19 @@ def ask(question: str, filters: dict | None = None, _trace: dict | None = None) 
         truncated=truncated,
         citations=len(citations),
     )
+
+    _audit({
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "question": question, "filters": filters, "auto_ticker": auto_ticker,
+        "outcome": "abstained" if abstained else "answered",
+        "ungrounded_suppressed": ungrounded, "truncated": truncated,
+        "citations": [c.chunk_id for c in citations],
+        "answer_head": answer[:300],
+        "retrieval_ms": retrieval_ms, "rerank_ms": rerank_ms,
+        "generation_ms": generation_ms, "total_ms": total_ms,
+        "model_version": MODEL_VERSION,
+        "corpus_snapshot_hash": _corpus_snapshot_hash(),
+    })
 
     return AskResponse(
         answer=answer,

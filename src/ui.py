@@ -11,6 +11,21 @@ from src.retrieve.company_filter import detect_ticker  # noqa: E402
 
 st.set_page_config(page_title="Pharma Diligence Copilot", layout="wide")
 st.title("Pharma Diligence Copilot")
+
+
+@st.cache_resource
+def _warm_models():
+    """Load the embedder + reranker once per server process so the first
+    question doesn't pay the ~25s cold-start inside the user's request."""
+    from src.index import embed
+    from src.retrieve import rerank
+    embed.embed_query("warmup")
+    rerank._load_reranker()
+    return True
+
+
+with st.spinner("Loading models (first launch only)…"):
+    _warm_models()
 st.caption("Ask diligence questions over 12 pharma companies' latest SEC 10-K filings. Answers are grounded in the filings with citations, or the copilot abstains.")
 
 EXAMPLES = [
@@ -36,6 +51,9 @@ with st.sidebar:
             st.rerun()
 
 
+MAX_HISTORY = 20
+
+
 def run_query(question: str):
     filters = {}
     if company_filter.strip():
@@ -44,10 +62,21 @@ def run_query(question: str):
         try:
             filters["fiscal_year"] = {"$eq": int(year_filter.strip())}
         except ValueError:
-            st.warning("Fiscal year must be a number.")
-    with st.spinner("Retrieving and generating answer… (first query loads models, ~30s)"):
-        result = ask(question, filters=filters or None)
-    st.session_state.history.append({"question": question, "result": result})
+            # Don't spend an LLM call on a query the user didn't intend.
+            st.warning("Fiscal year must be a number — fix it and ask again.")
+            return
+    # Record the scope AT QUERY TIME; recomputing at render time against the
+    # live sidebar mislabels historical answers.
+    scope = None if company_filter.strip() else detect_ticker(question)
+    try:
+        with st.spinner("Retrieving and generating answer…"):
+            result = ask(question, filters=filters or None)
+    except Exception:
+        # Never dump a traceback (internal paths) into the browser.
+        st.error("Something went wrong answering this question. Please try again.")
+        return
+    st.session_state.history.append({"question": question, "result": result, "scope": scope})
+    st.session_state.history = st.session_state.history[-MAX_HISTORY:]
 
 
 # --- input ---
@@ -82,8 +111,8 @@ for idx, item in enumerate(reversed(st.session_state.history)):
     st.divider()
     st.markdown(f"**Q:** {q}")
 
-    scope = detect_ticker(q)
-    if scope and not company_filter.strip():
+    scope = item.get("scope")
+    if scope:
         st.caption(f"🔎 Auto-scoped to **{scope}**")
 
     if r.error:
@@ -98,7 +127,9 @@ for idx, item in enumerate(reversed(st.session_state.history)):
     with st.expander("Sources & timing", expanded=is_latest):
         if r.citations:
             for c in r.citations:
-                st.markdown(f"- [{c.n}] **{c.company}** {c.fiscal_year} 10-K, {c.section} · `{c.chunk_id}`")
+                st.markdown(f"**[{c.n}] {c.company}** {c.fiscal_year} 10-K, {c.section} · `{c.chunk_id}`")
+                if c.snippet:
+                    st.caption(f"“{c.snippet}…”")
         else:
             st.caption("No citations (abstained or no grounded sources).")
         t = r.timing

@@ -1,3 +1,5 @@
+import threading
+
 import torch
 from sentence_transformers import SentenceTransformer
 from src.config import cfg
@@ -6,6 +8,9 @@ from src.logging_setup import get_logger
 log = get_logger("embed")
 
 _model: SentenceTransformer | None = None
+# Torch modules are not safe for concurrent forward passes; server worker
+# threads (uvicorn pool, Streamlit sessions) must not encode simultaneously.
+_encode_lock = threading.Lock()
 
 MODEL_NAME = cfg["embeddings"]["model_name"]
 NORMALIZE = cfg["embeddings"]["normalize"]
@@ -49,21 +54,23 @@ def embed_documents(texts: list[str]) -> list[list[float]]:
     batch_size = cfg["embeddings"]["batch_size_gpu"] if device != "cpu" else cfg["embeddings"]["batch_size_cpu"]
     # The doc prefix is applied only to the embedding input; stored text stays verbatim.
     inputs = [DOC_PREFIX + t for t in texts] if DOC_PREFIX else texts
-    embeddings = model.encode(
-        inputs,
-        batch_size=batch_size,
-        normalize_embeddings=NORMALIZE,
-        show_progress_bar=True,
-    )
+    with _encode_lock:
+        embeddings = model.encode(
+            inputs,
+            batch_size=batch_size,
+            normalize_embeddings=NORMALIZE,
+            show_progress_bar=True,
+        )
     return embeddings.tolist()
 
 
 def embed_query(query: str) -> list[float]:
     model = get_model()
     prefixed = QUERY_PREFIX + query
-    embedding = model.encode(
-        [prefixed],
-        normalize_embeddings=NORMALIZE,
-        show_progress_bar=False,
-    )
+    with _encode_lock:
+        embedding = model.encode(
+            [prefixed],
+            normalize_embeddings=NORMALIZE,
+            show_progress_bar=False,
+        )
     return embedding[0].tolist()
