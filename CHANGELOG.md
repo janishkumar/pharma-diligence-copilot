@@ -284,3 +284,35 @@ only; $8 to regenerate and M7 needs them on the training box).
 
 Next: M7 — QLoRA fine-tune of Qwen2.5-7B-Instruct on Azure A100 (blocked on test-set
 approval + Azure GPU provisioning/quota).
+
+### M7 — Fine-tune (2026-11-06) — TRAINED; acceptance eval PASS (tie)
+
+**Status:** model trained and test answers generated; the base-vs-tuned judging (`python finetune/eval_models.py`) has NOT run — the OpenAI judge account is out of credits. M7 is not signed off until that comparison passes (tuned faithfulness >= base, PRD 11.4) and the user approves the test set.
+
+**Training:** Qwen2.5-7B-Instruct, 4-bit QLoRA (Unsloth), r=16 alpha=16 dropout 0, all projection modules, lr 2e-4 cosine, 2 epochs, effective batch 16, 236 steps / 2792 s on one A100 80GB. Train loss 0.93 -> ~0.41; held-out validation loss 0.435 (smoke test 0.625). Adapter 161 MB (local, gitignored).
+
+**Training data (`finetune/sft_data.py`):** chat format identical to the inference prompt. Each example = gold chunk + 2 same-company distractors (numbered, shuffled), answer carries a ` [n]` citation to the gold chunk (the pipeline suppresses uncited answers). +10% abstention examples (other-company chunks -> exact refusal string), since the M6 data has none. 1883 train (172 abstention) / 94 val (split by source chunk) / 184 test (169 answerable + 15 abstention).
+
+**PRD deviations (documented):** max_seq_length 2048 -> 4096 (three ~770-token chunks average 2.7k tokens); packing off with completion-only loss (packing is incompatible with response-only masking and sequences were mostly full anyway).
+
+**Contamination found and fixed:** filings repeat passages, so chunk-ID separation alone leaked: 3 test chunks' interior text appeared in train prompts and 2 test answers duplicated train answers. Added decontamination (dropped 62 + 2 examples); re-verified 0 interior-text, 0 answer, 0 near-duplicate-question overlaps. (Head/tail overlap with neighbouring chunks is expected from the 120-token chunk overlap and is not leakage.)
+
+**Infrastructure:** A100 quota obtained via `az quota create` after the portal wizard proved unreliable (East US and others returned ContactSupport; South Central US approved 24 vCPUs); the Free support plan blocks the support-ticket API. VM zone 2 had no capacity (ZonalAllocationFailed), zone 3 worked. Total compute cost ~$4.65 (18:41-19:57 UTC); resource group deleted and verified empty. Generation ran on the VM; judging is local so no API keys were on the VM.
+
+**Tooling added:** `finetune/sft_data.py`, `train_qlora.py`, `gen_answers.py`, `eval_models.py` (GPT-4o judge, paired bootstrap CI, fails fast on judge errors).
+
+Next: add OpenAI credits -> run `finetune/eval_models.py`. PASS -> M8 (GGUF Q4_K_M export + Ollama). FAIL -> stop and present the gap (PRD 11.4).
+
+
+### M7 acceptance eval + M8 local serving (2026-11-06)
+- **Judge: GPT-4o on 316 answers (169 answerable + 15 abstain, base and tuned).**
+  Base vs tuned: faithfulness 0.894 (n=147 judged) vs 0.905 (n=169); relevance 0.991 vs 0.994; correctness 0.878 vs 0.892;
+  false-abstention 13.0% vs 0.0%; cites gold chunk 98.6% vs 100%; abstention on should-refuse 15/15 vs 14/15.
+  Paired faithfulness diff +0.021, 95% CI [-0.026, +0.067], W/T/L 23/111/13 -> **PASS by tie rule** (CI spans 0; not a proven improvement).
+  Caveats: base abstained on 22 answerable questions, so faithfulness is judged on different populations; tuned is worse on 'factual' (0.953 vs 1.000) and missed 1 of 15 abstentions.
+- **M8:** adapter merged into bf16 Qwen2.5-7B-Instruct (transformers+peft, not Unsloth export - same result, fewer moving parts), converted with llama.cpp, quantized Q4_K_M
+  -> `models/gguf/pharma-diligence-q4_k_m.gguf` (4.68 GB, sha256 84c16328...c65e). Modelfile per PRD 11.5 verbatim. `ollama create pharma-diligence`.
+- **Fix:** PRD Modelfile has num_ctx 4096 but pipeline sends 8 reranked chunks (~6-7k tokens) -> Ollama 400. Added `serving.local_top_n: 3` (model was trained on 3-chunk prompts), applied only for the local backend; `model_version` now reports `ollama/pharma-diligence` under `--local`.
+- **Verified offline** (`OFFLINE_MODE=1 python scripts/03_ask.py --local ...`): cited answers, abstains on out-of-corpus question. Warm pipeline run 5.2 s (retrieval 0.14, rerank 2.0, generation 3.1); some other runs took 21-27 s wall - not yet explained. Rerank (CPU) exceeds the 1 s stage target.
+- Azure: second A100 session ~18 min (~$1.1), resource group deleted and verified. Total Azure for M7+M8 ~ $5.8 (estimate; billing data not yet posted).
+- Test set (169 pairs, `data/finetune/test_v1_for_review.md`) approved by Janish Kumar 2026-11-06 -> M7 signed off.

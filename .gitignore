@@ -45,3 +45,7 @@ eval/reports/*
 
 # Lockfiles are generated on first build
 requirements.lock
+
+# Fine-tuned LoRA adapter (161MB, reproducible from finetune/train_qlora.py) and local handoff notes
+models/adapter/
+docs/handoff/

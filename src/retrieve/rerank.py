@@ -12,6 +12,7 @@ gets its own single-use executor — a shared 1-worker pool would be permanently
 occupied by one hung predict, silently disabling reranking for the process
 lifetime. A hung call leaks one thread (bounded, logged), nothing more.
 """
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
@@ -23,6 +24,10 @@ log = get_logger("rerank")
 RERANK_ENABLED = cfg["rerank"]["enabled"]
 RERANK_MODEL = cfg["rerank"]["model_name"]
 TOP_N = cfg["rerank"]["top_n"]
+# The local fine-tuned model was trained on 3-chunk prompts and served with a
+# 4096-token context (PRD 11.5); 8 chunks (~6-7k tokens) overflow it.
+if os.getenv("GENERATOR_BACKEND_OVERRIDE") == "ollama":
+    TOP_N = cfg["serving"].get("local_top_n", TOP_N)
 TIMEOUT = cfg["rerank"]["timeout_sec"]
 SCORE_THRESHOLD = cfg["rerank"]["score_threshold"]
 

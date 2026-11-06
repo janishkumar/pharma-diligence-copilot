@@ -1,4 +1,5 @@
 import hashlib
+import os
 import json
 import re
 import threading
@@ -16,7 +17,10 @@ from src.schemas import AskResponse, Citation, TimingBreakdown
 
 log = get_logger("pipeline")
 
-MODEL_VERSION = f"{cfg['generation']['backend']}/{cfg['generation']['model']}"
+if os.getenv("GENERATOR_BACKEND_OVERRIDE") == "ollama":
+    MODEL_VERSION = f"ollama/{cfg['serving']['ollama_model_name']}"
+else:
+    MODEL_VERSION = f"{cfg['generation']['backend']}/{cfg['generation']['model']}"
 
 # Matches a bracketed citation group: [1], [1,2], [1, 2], [1-3], [1, 2-4].
 _CITATION_RE = re.compile(r"\[(\d+(?:\s*[,\-]\s*\d+)*)\]")

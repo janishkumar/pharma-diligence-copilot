@@ -100,6 +100,7 @@ serving:
   gguf_quant: Q4_K_M
   ollama_model_name: "pharma-diligence"
   ollama_host: "http://localhost:11434"
+  local_top_n: 3  # chunks in the prompt for the local model (trained on 3; num_ctx 4096)
 
 # Budgets
 budgets:
